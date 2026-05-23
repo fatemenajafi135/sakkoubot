@@ -8,7 +8,7 @@ from typing import Optional
 
 from app.database import get_db, BotRecord
 from app.models import BotResponse, BotType
-from app.services.rag import add_documents_to_bot, delete_bot_collection
+from app.services.rag import add_documents_to_bot, add_documents_from_directory, delete_bot_collection
 
 router = APIRouter(prefix="/bots", tags=["bots"])
 
@@ -17,12 +17,18 @@ router = APIRouter(prefix="/bots", tags=["bots"])
 async def create_bot(
     name: str = Form(..., description="Display name for this bot instance"),
     bot_type: BotType = Form(..., description="'resume' or 'rules'"),
-    documents: list[UploadFile] = File(default=[], description="Documents to index (PDF, DOCX, TXT)"),
+    documents: list[UploadFile] = File(default=[], description="Upload files directly (PDF, DOCX, TXT)"),
+    directory_path: Optional[str] = Form(None, description="Server-side directory path — all supported docs inside will be ingested recursively"),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Create a new bot and optionally upload documents to its knowledge base.
-    You can create multiple bots of the same type; use /bots/{id}/set-active
+    Create a new bot and optionally seed its knowledge base.
+
+    Two ways to add documents (can be combined):
+    - **documents**: upload individual files (PDF, DOCX, TXT)
+    - **directory_path**: path to a folder on the server — every PDF/DOCX/TXT inside is indexed recursively
+
+    You can create multiple bots of the same type; use POST /bots/{id}/set-active
     to choose which one answers chat requests.
     """
     bot_id = str(uuid.uuid4())
@@ -31,7 +37,13 @@ async def create_bot(
     if documents:
         valid_docs = [f for f in documents if f.filename]
         if valid_docs:
-            doc_count = await add_documents_to_bot(bot_id, valid_docs)
+            doc_count += await add_documents_to_bot(bot_id, valid_docs)
+
+    if directory_path:
+        try:
+            doc_count += add_documents_from_directory(bot_id, directory_path)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
 
     bot = BotRecord(
         id=bot_id,
@@ -113,20 +125,39 @@ async def set_active_bot(bot_id: str, db: AsyncSession = Depends(get_db)):
 @router.post("/{bot_id}/documents", response_model=BotResponse)
 async def add_documents(
     bot_id: str,
-    documents: list[UploadFile] = File(...),
+    documents: list[UploadFile] = File(default=[], description="Upload files directly (PDF, DOCX, TXT)"),
+    directory_path: Optional[str] = Form(None, description="Server-side directory path — all supported docs inside will be ingested recursively"),
     db: AsyncSession = Depends(get_db),
 ):
-    """Add more documents to an existing bot's knowledge base."""
+    """
+    Add more documents to an existing bot's knowledge base.
+
+    Two ways to add documents (can be combined):
+    - **documents**: upload individual files (PDF, DOCX, TXT)
+    - **directory_path**: path to a folder on the server — every PDF/DOCX/TXT inside is indexed recursively
+    """
     result = await db.execute(select(BotRecord).where(BotRecord.id == bot_id))
     bot = result.scalar_one_or_none()
     if not bot:
         raise HTTPException(status_code=404, detail="Bot not found")
 
     valid_docs = [f for f in documents if f.filename]
-    if not valid_docs:
-        raise HTTPException(status_code=422, detail="No valid documents provided")
+    if not valid_docs and not directory_path:
+        raise HTTPException(
+            status_code=422,
+            detail="Provide at least one of: documents (file upload), directory_path",
+        )
 
-    added = await add_documents_to_bot(bot_id, valid_docs)
+    added = 0
+    if valid_docs:
+        added += await add_documents_to_bot(bot_id, valid_docs)
+
+    if directory_path:
+        try:
+            added += add_documents_from_directory(bot_id, directory_path)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
     bot.document_count += added
     await db.commit()
     await db.refresh(bot)

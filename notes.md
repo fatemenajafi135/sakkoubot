@@ -52,12 +52,12 @@ backend/
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/bots` | Create a new bot with optional document upload |
+| `POST` | `/bots` | Create a bot; seed docs via file upload and/or a server-side directory path |
 | `GET` | `/bots` | List all bots (filterable by `?bot_type=`) |
 | `GET` | `/bots/{id}` | Get a specific bot |
 | `POST` | `/bots/{id}/set-active` | Set this bot as the active one for its type |
 | `GET` | `/bots/active/{bot_type}` | Get the currently active bot for a type |
-| `POST` | `/bots/{id}/documents` | Upload more documents to an existing bot |
+| `POST` | `/bots/{id}/documents` | Upload files or point to a server-side directory |
 | `DELETE` | `/bots/{id}` | Delete a bot and its vector store |
 | `POST` | `/chat` | Send a message; select bot by `bot_type` or `bot_id` |
 | `GET` | `/health` | Health check |
@@ -80,6 +80,13 @@ Uses LangChain's history-aware retrieval (LCEL):
 2. ChromaDB retrieves the top-k relevant chunks.
 3. A QA prompt feeds the context + history to the LLM to produce a grounded answer.
 4. Source documents (filename, page, excerpt) are returned alongside the answer.
+
+**Document ingestion — two modes**
+Both `POST /bots` and `POST /bots/{id}/documents` accept:
+- `documents` (multipart file upload) — individual PDF/DOCX/TXT files
+- `directory_path` (form string) — a server-side folder; all supported files inside are indexed **recursively**
+
+Both can be used together in one request; counts accumulate. Bad paths return HTTP 400.
 
 **Storage**
 - Bot metadata (id, name, type, active flag, document count) lives in SQLite.

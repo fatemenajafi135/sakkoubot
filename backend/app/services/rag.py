@@ -120,6 +120,44 @@ async def add_documents_to_bot(bot_id: str, files: list) -> int:
     return len(all_docs)
 
 
+_SUPPORTED_SUFFIXES = {".pdf", ".docx", ".doc", ".txt"}
+
+
+def add_documents_from_directory(bot_id: str, dir_path: str) -> int:
+    """
+    Walk dir_path recursively, load every supported file (PDF/DOCX/TXT),
+    chunk and index into the bot's Chroma collection.
+    Returns the number of source files loaded.
+    """
+    p = Path(dir_path)
+    if not p.exists():
+        raise ValueError(f"Directory not found: {dir_path}")
+    if not p.is_dir():
+        raise ValueError(f"Path is not a directory: {dir_path}")
+
+    all_docs = []
+    for file_path in sorted(p.rglob("*")):
+        if not file_path.is_file():
+            continue
+        if file_path.suffix.lower() not in _SUPPORTED_SUFFIXES:
+            continue
+
+        docs = _load_file(str(file_path), file_path.name)
+        for doc in docs:
+            doc.metadata["source_filename"] = file_path.name
+            doc.metadata["source_path"] = str(file_path)
+        all_docs.extend(docs)
+
+    if not all_docs:
+        return 0
+
+    chunks = _splitter.split_documents(all_docs)
+    vectorstore = _get_vectorstore(bot_id)
+    vectorstore.add_documents(chunks)
+
+    return len(all_docs)
+
+
 async def query_bot(
     bot_id: str,
     question: str,
