@@ -4,7 +4,7 @@ import uuid
 from fastapi import APIRouter, Depends, Form, File, HTTPException, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
-from typing import Optional
+from typing import Optional, List
 
 from app.database import get_db, BotRecord
 from app.models import BotResponse, BotType
@@ -17,7 +17,7 @@ router = APIRouter(prefix="/bots", tags=["bots"])
 async def create_bot(
     name: str = Form(..., description="Display name for this bot instance"),
     bot_type: BotType = Form(..., description="'resume' or 'rules'"),
-    documents: list[UploadFile] = File(default=[], description="Upload files directly (PDF, DOCX, TXT)"),
+    documents: Optional[List[UploadFile]] = File(default=None, description="Upload files directly (PDF, DOCX, TXT)"),
     directory_path: Optional[str] = Form(None, description="Server-side directory path — all supported docs inside will be ingested recursively"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -34,10 +34,9 @@ async def create_bot(
     bot_id = str(uuid.uuid4())
 
     doc_count = 0
-    if documents:
-        valid_docs = [f for f in documents if f.filename]
-        if valid_docs:
-            doc_count += await add_documents_to_bot(bot_id, valid_docs)
+    valid_docs = [f for f in (documents or []) if f.filename]
+    if valid_docs:
+        doc_count += await add_documents_to_bot(bot_id, valid_docs)
 
     if directory_path:
         try:
@@ -125,7 +124,7 @@ async def set_active_bot(bot_id: str, db: AsyncSession = Depends(get_db)):
 @router.post("/{bot_id}/documents", response_model=BotResponse)
 async def add_documents(
     bot_id: str,
-    documents: list[UploadFile] = File(default=[], description="Upload files directly (PDF, DOCX, TXT)"),
+    documents: Optional[List[UploadFile]] = File(default=None, description="Upload files directly (PDF, DOCX, TXT)"),
     directory_path: Optional[str] = Form(None, description="Server-side directory path — all supported docs inside will be ingested recursively"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -141,7 +140,7 @@ async def add_documents(
     if not bot:
         raise HTTPException(status_code=404, detail="Bot not found")
 
-    valid_docs = [f for f in documents if f.filename]
+    valid_docs = [f for f in (documents or []) if f.filename]
     if not valid_docs and not directory_path:
         raise HTTPException(
             status_code=422,

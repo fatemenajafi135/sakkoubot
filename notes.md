@@ -83,10 +83,13 @@ Uses LangChain's history-aware retrieval (LCEL):
 
 **Document ingestion — two modes**
 Both `POST /bots` and `POST /bots/{id}/documents` accept:
-- `documents` (multipart file upload) — individual PDF/DOCX/TXT files
+- `documents` (multipart file upload) — individual PDF/DOCX/TXT files selected via file picker
 - `directory_path` (form string) — a server-side folder; all supported files inside are indexed **recursively**
 
 Both can be used together in one request; counts accumulate. Bad paths return HTTP 400.
+
+**Swagger UI file picker fix**
+FastAPI + Pydantic v2 emits `contentMediaType: application/octet-stream` for `UploadFile` fields (OpenAPI 3.1 style), but Swagger UI only renders a file-picker widget for `format: binary` (OpenAPI 3.0 style). Fixed in `main.py` via a custom `openapi()` override (`_patch_file_fields`) that post-processes the generated schema: replaces `contentMediaType` with `format: binary` and flattens `anyOf: [array, null]` into `array + nullable: true`. The app now serves OpenAPI 3.0.2.
 
 **Storage**
 - Bot metadata (id, name, type, active flag, document count) lives in SQLite.
