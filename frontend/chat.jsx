@@ -641,7 +641,10 @@ const CHAT_CSS = `
 }
 `;
 
-// ── Mock AI responses ────────────────────────────────────────────────────
+// ── Backend API ──────────────────────────────────────────────────────────
+const API_BASE = "http://localhost:8000";
+
+// ── Mock AI responses (kept as fallback during development) ──────────────
 const RESPONSES = {
   resume: {
     "هوش مصنوعی": {
@@ -1049,11 +1052,29 @@ function Chat({
   // Only AI messages whose id matches streamingId animate. Old messages
   // (loaded from history or already finished) render full immediately.
   const [streamingId, setStreamingId] = React.useState(null);
+  const [loading, setLoading] = React.useState(false);
+  const [activeBotId, setActiveBotId] = React.useState(null);
+  const [activeBotError, setActiveBotError] = React.useState(null);
   const [draft, setDraft] = React.useState("");
   const [sidebarOpen, setSidebarOpen] = React.useState(false);
   const scrollRef = React.useRef(null);
   const taRef = React.useRef(null);
   const initialMountRef = React.useRef(true);
+
+  // Fetch the active bot UUID for this bot type on mount
+  React.useEffect(() => {
+    setActiveBotId(null);
+    setActiveBotError(null);
+    fetch(`${API_BASE}/bots/active/${bot.id}`)
+      .then((res) => {
+        if (!res.ok) throw new Error("no_active_bot");
+        return res.json();
+      })
+      .then((data) => setActiveBotId(data.id))
+      .catch(() => setActiveBotError(
+        `هیچ ربات فعالی برای نوع «${bot.name}» تنظیم نشده است. ابتدا یک ربات بسازید و آن را فعال کنید.`
+      ));
+  }, [bot.id]);
 
   // Pipe messages upstream — App owns persistence. Skip first run so we don't
   // immediately echo the initial seed back as a "change".
@@ -1078,22 +1099,63 @@ function Chat({
     return () => clearInterval(id);
   }, [streamingId, scrollToBottom]);
 
-  const send = (text) => {
+  const send = async (text) => {
     const t = text.trim();
-    if (!t || streamingId) return;
+    if (!t || streamingId || loading || !activeBotId) return;
+
     const now = new Date();
     const userMsg = { id: Date.now(), role: "user", text: t, time: now.toISOString() };
-    const response = pickResponse(bot.id, t);
+
+    // Snapshot history BEFORE adding the new user message
+    const history = messages.map((m) =>
+      m.role === "user"
+        ? { role: "user", content: m.text }
+        : { role: "assistant", content: m.response?.md || "" }
+    );
+
+    setMessages((prev) => [...prev, userMsg]);
+    setLoading(true);
+    setDraft("");
+    if (taRef.current) taRef.current.style.height = "auto";
+
+    let md, cites;
+    try {
+      const res = await fetch(`${API_BASE}/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: t,
+          bot_id: activeBotId,
+          chat_history: history,
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        md = data.answer;
+        cites = (data.sources || []).map((s) => ({
+          title: s.title,
+          loc: s.loc || s.title,
+          score: s.score != null ? String(s.score) : null,
+        }));
+      } else {
+        md = `خطا در دریافت پاسخ (کد ${res.status}). لطفاً دوباره تلاش کنید.`;
+        cites = [];
+      }
+    } catch {
+      md = "در اتصال به سرور مشکلی پیش آمد. لطفاً مطمئن شوید سرور در حال اجراست.";
+      cites = [];
+    }
+
     const aiMsg = {
       id: Date.now() + 1,
       role: "ai",
-      response,
-      time: new Date(now.getTime() + 1).toISOString()
+      response: { md, cites },
+      time: new Date().toISOString(),
     };
-    setMessages((prev) => [...prev, userMsg, aiMsg]);
+    setLoading(false);
+    setMessages((prev) => [...prev, aiMsg]);
     setStreamingId(aiMsg.id);
-    setDraft("");
-    if (taRef.current) taRef.current.style.height = "auto";
   };
 
   const onKey = (e) => {
@@ -1217,6 +1279,13 @@ function Chat({
                       )}
                     </div>
                   ))}
+                  {loading && (
+                    <div className="msg ai">
+                      <div className="msg-bubble">
+                        <div className="typing"><span></span><span></span><span></span></div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -1236,7 +1305,7 @@ function Chat({
                   type="button"
                   className="composer-send"
                   onClick={() => send(draft)}
-                  disabled={!draft.trim() || !!streamingId}
+                  disabled={!draft.trim() || !!streamingId || loading || !activeBotId}
                   aria-label="ارسال پیام"
                 >
                   <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
@@ -1245,8 +1314,11 @@ function Chat({
                 </button>
               </div>
               <div className="composer-foot">
-                <span>برای ارسال: <kbd>Enter</kbd> · خط جدید: <kbd>Shift + Enter</kbd></span>
-                <span>پاسخ‌ها از پایگاه دانش بازیابی می‌شوند</span>
+                {activeBotError
+                  ? <span style={{color:"var(--accent)"}}>{activeBotError}</span>
+                  : <><span>برای ارسال: <kbd>Enter</kbd> · خط جدید: <kbd>Shift + Enter</kbd></span>
+                    <span>پاسخ‌ها از پایگاه دانش بازیابی می‌شوند</span></>
+                }
               </div>
             </div>
           </section>

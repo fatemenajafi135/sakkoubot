@@ -100,6 +100,18 @@ FastAPI + Pydantic v2 emits `contentMediaType: application/octet-stream` for `Up
 **Chunk debug logging**
 `index_documents_sync` prints the total chunk count and the first 50 chars of each chunk to stdout during indexing — useful for verifying documents are parsed and split correctly.
 
+**Frontend ↔ Backend connection**
+`chat.jsx` now fetches `GET /bots/active/{bot_type}` on mount to resolve the real bot UUID, then sends `bot_id: <uuid>` (not `bot_type`) in every `POST /chat` request. The send button is disabled and a Persian error message is shown if no active bot is found.
+
+**Backend chat request logging**
+`chat.py` prints every incoming request (message, bot_id/bot_type, history length), the resolved bot (id, name, type, status), the first 120 chars of the answer, and source count to the uvicorn terminal — allows verifying frontend↔backend traffic without touching the browser.
+
+**Frontend render-loop fix (browser warning spam)**
+`onMessagesChange` in `app.jsx` was a plain inline function — recreated on every render. Because it was listed in Chat's `useEffect` dependency array, every `setHistories` call triggered the effect again, creating an infinite update loop and hundreds of console warnings. Fixed by wrapping it in `React.useCallback([activeBot])` so its reference is stable within a session.
+
+**Chat component remount fix**
+`Chat` was keyed as `` `${activeBot}-${activeSessionId}-${sessionVersion}` ``. When the first message was sent, `onMessagesChange` created a new session and called `setActiveSessionId`, changing the key and causing React to **unmount the Chat mid-request** — killing the in-flight API call and wiping all state. Fixed by removing `activeSessionId` from the key: `` `${activeBot}-${sessionVersion}` ``. Only intentional navigation (new chat, select session, switch bot) now remounts Chat.
+
 **Storage**
 - Bot metadata (id, name, type, active flag, document count, status) lives in SQLite.
 - Indexing job records (id, bot_id, status, error) also in SQLite (`jobs` table).

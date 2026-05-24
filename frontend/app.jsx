@@ -271,7 +271,9 @@ function App() {
 
   // Called by Chat whenever its messages list changes. Empty arrays are
   // ignored so just opening a fresh chat doesn't pollute history.
-  const onMessagesChange = (msgs) => {
+  // useCallback with [activeBot] keeps the reference stable during a session
+  // so Chat's useEffect doesn't loop on every setHistories call.
+  const onMessagesChange = React.useCallback((msgs) => {
     if (!activeBot || !msgs || msgs.length === 0) return;
     const botId = activeBot;
     const now = new Date().toISOString();
@@ -301,7 +303,7 @@ function App() {
         )
       }));
     }
-  };
+  }, [activeBot]);
 
   // ── Resolve initial messages for the Chat key ──────────────────────────
   const initialMessages = React.useMemo(() => {
@@ -319,7 +321,7 @@ function App() {
       {screen === "home" && <Selector bots={BOTS} onPick={openBot} />}
       {screen === "chat" && activeBot && (
         <Chat
-          key={`${activeBot}-${activeSessionId || "new"}-${sessionVersion}`}
+          key={`${activeBot}-${sessionVersion}`}
           bot={BOTS[activeBot]}
           initialMessages={initialMessages}
           onMessagesChange={onMessagesChange}
