@@ -19,11 +19,13 @@ from app.config import settings
 _embeddings = OpenAIEmbeddings(
     model=settings.openai_embedding_model,
     api_key=settings.openai_api_key,
+    base_url=settings.openai_base_url,
 )
 
 _llm = ChatOpenAI(
     model=settings.openai_chat_model,
     api_key=settings.openai_api_key,
+    base_url=settings.openai_base_url,
     temperature=0.1,
 )
 

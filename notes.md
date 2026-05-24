@@ -135,6 +135,7 @@ uv run uvicorn app.main:app --reload
 | Variable | Default | Description |
 |---|---|---|
 | `OPENAI_API_KEY` | — | Required |
+| `OPENAI_BASE_URL` | `https://api.openai.com/v1` | AI provider base URL — swap to use any OpenAI-compatible endpoint |
 | `OPENAI_CHAT_MODEL` | `gpt-4o-mini` | LLM model |
 | `OPENAI_EMBEDDING_MODEL` | `text-embedding-3-small` | Embedding model |
 | `CHUNK_SIZE` | `1000` | Document chunk size (chars) |
