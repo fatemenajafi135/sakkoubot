@@ -8,7 +8,7 @@ from fastapi.openapi.utils import get_openapi
 
 from app.config import settings
 from app.database import init_db
-from app.routers import bots, chat
+from app.routers import bots, chat, jobs
 
 
 @asynccontextmanager
@@ -35,6 +35,7 @@ app.add_middleware(
 
 app.include_router(bots.router)
 app.include_router(chat.router)
+app.include_router(jobs.router)
 
 
 def _patch_file_fields(obj: Any) -> Any:

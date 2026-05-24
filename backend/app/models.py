@@ -11,7 +11,27 @@ class BotResponse(BaseModel):
     bot_type: str
     is_active: bool
     document_count: int
+    status: str
     created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class BotCreateResponse(BaseModel):
+    bot_id: str
+    job_id: str
+    status: str
+    name: str
+    bot_type: str
+
+
+class JobResponse(BaseModel):
+    job_id: str
+    bot_id: str
+    status: str
+    created_at: datetime
+    updated_at: datetime
+    error: Optional[str] = None
 
     model_config = {"from_attributes": True}
 
@@ -23,9 +43,6 @@ class ChatMessage(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1)
-    # Provide one of these to select the bot:
-    # - bot_type  → uses the currently active bot for that type
-    # - bot_id    → targets a specific bot regardless of active status
     bot_type: Optional[BotType] = None
     bot_id: Optional[str] = None
     chat_history: list[ChatMessage] = Field(default_factory=list)

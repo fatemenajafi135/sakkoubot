@@ -21,12 +21,13 @@ backend/
 │   └── sakkoubot.db            # SQLite database
 └── app/
     ├── config.py               # all settings via pydantic-settings (.env)
-    ├── database.py             # SQLAlchemy async engine + BotRecord table
+    ├── database.py             # SQLAlchemy async engine + BotRecord + JobRecord tables
     ├── models.py               # Pydantic request/response schemas
-    ├── main.py                 # FastAPI app, CORS middleware, lifespan
+    ├── main.py                 # FastAPI app, CORS middleware, lifespan, OpenAPI schema patch
     ├── routers/
-    │   ├── bots.py             # bot management endpoints
-    │   └── chat.py             # chat endpoint
+    │   ├── bots.py             # bot management endpoints (async, returns 202 + job_id)
+    │   ├── chat.py             # chat endpoint
+    │   └── jobs.py             # job status endpoints
     └── services/
         └── rag.py              # LangChain + ChromaDB RAG pipeline
 ```
@@ -57,9 +58,11 @@ backend/
 | `GET` | `/bots/{id}` | Get a specific bot |
 | `POST` | `/bots/{id}/set-active` | Set this bot as the active one for its type |
 | `GET` | `/bots/active/{bot_type}` | Get the currently active bot for a type |
-| `POST` | `/bots/{id}/documents` | Upload files or point to a server-side directory |
+| `POST` | `/bots/{id}/documents` | Upload files or point to a server-side directory (async, returns job_id) |
 | `DELETE` | `/bots/{id}` | Delete a bot and its vector store |
 | `POST` | `/chat` | Send a message; select bot by `bot_type` or `bot_id` |
+| `GET` | `/jobs/{job_id}` | Poll background indexing job status |
+| `GET` | `/jobs?bot_id=` | List all jobs for a bot |
 | `GET` | `/health` | Health check |
 
 ---
@@ -91,8 +94,15 @@ Both can be used together in one request; counts accumulate. Bad paths return HT
 **Swagger UI file picker fix**
 FastAPI + Pydantic v2 emits `contentMediaType: application/octet-stream` for `UploadFile` fields (OpenAPI 3.1 style), but Swagger UI only renders a file-picker widget for `format: binary` (OpenAPI 3.0 style). Fixed in `main.py` via a custom `openapi()` override (`_patch_file_fields`) that post-processes the generated schema: replaces `contentMediaType` with `format: binary` and flattens `anyOf: [array, null]` into `array + nullable: true`. The app now serves OpenAPI 3.0.2.
 
+**Async bot creation (background indexing)**
+`POST /bots` and `POST /bots/{id}/documents` return HTTP 202 immediately with `{bot_id, job_id, status: "pending"}`. Document chunking and OpenAI embedding run in a background thread via FastAPI `BackgroundTasks` + `run_in_executor`. Poll `GET /jobs/{job_id}` to track progress (`pending → indexing → completed / failed`). The bot's `status` field mirrors this: `pending → indexing → ready / failed`. `POST /bots/{id}/set-active` rejects with 409 if the bot is not yet `ready`.
+
+**Chunk debug logging**
+`index_documents_sync` prints the total chunk count and the first 50 chars of each chunk to stdout during indexing — useful for verifying documents are parsed and split correctly.
+
 **Storage**
-- Bot metadata (id, name, type, active flag, document count) lives in SQLite.
+- Bot metadata (id, name, type, active flag, document count, status) lives in SQLite.
+- Indexing job records (id, bot_id, status, error) also in SQLite (`jobs` table).
 - Embeddings live in ChromaDB under a collection named `bot_{id}`.
 - Deleting a bot cleans up both.
 

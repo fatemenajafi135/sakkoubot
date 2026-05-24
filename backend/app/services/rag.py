@@ -123,6 +123,67 @@ async def add_documents_to_bot(bot_id: str, files: list) -> int:
 _SUPPORTED_SUFFIXES = {".pdf", ".docx", ".doc", ".txt"}
 
 
+def index_documents_sync(
+    bot_id: str,
+    file_payloads: list[dict],
+    directory_path: str | None = None,
+) -> int:
+    """
+    Synchronous, thread-safe document indexing.
+    file_payloads: list of {"filename": str, "content": bytes} (bytes already read before background task starts)
+    Returns total number of source files loaded.
+    Safe to call from a background thread via run_in_executor.
+    """
+    all_docs = []
+
+    for payload in file_payloads:
+        filename = payload["filename"]
+        content = payload["content"]
+        suffix = Path(filename).suffix.lower()
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            tmp.write(content)
+            tmp_path = tmp.name
+
+        try:
+            docs = _load_file(tmp_path, filename)
+            for doc in docs:
+                doc.metadata["source_filename"] = filename
+            all_docs.extend(docs)
+        finally:
+            os.unlink(tmp_path)
+
+    if directory_path:
+        p = Path(directory_path)
+        if not p.exists():
+            raise ValueError(f"Directory not found: {directory_path}")
+        if not p.is_dir():
+            raise ValueError(f"Path is not a directory: {directory_path}")
+        for file_path in sorted(p.rglob("*")):
+            if not file_path.is_file():
+                continue
+            if file_path.suffix.lower() not in _SUPPORTED_SUFFIXES:
+                continue
+            docs = _load_file(str(file_path), file_path.name)
+            for doc in docs:
+                doc.metadata["source_filename"] = file_path.name
+                doc.metadata["source_path"] = str(file_path)
+            all_docs.extend(docs)
+
+    if not all_docs:
+        return 0
+
+    chunks = _splitter.split_documents(all_docs)
+    print(f"[chunking] {len(chunks)} chunks from {len(all_docs)} source pages")
+    for i, chunk in enumerate(chunks):
+        print(f"  chunk[{i}]: {chunk.page_content[:50]!r}")
+
+    vectorstore = _get_vectorstore(bot_id)
+    vectorstore.add_documents(chunks)
+
+    return len(all_docs)
+
+
 def add_documents_from_directory(bot_id: str, dir_path: str) -> int:
     """
     Walk dir_path recursively, load every supported file (PDF/DOCX/TXT),
