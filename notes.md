@@ -91,6 +91,9 @@ Both `POST /bots` and `POST /bots/{id}/documents` accept:
 
 Both can be used together in one request; counts accumulate. Bad paths return HTTP 400.
 
+**At least one document required on bot creation**
+`POST /bots` now rejects with HTTP 422 if neither `documents` nor `directory_path` is provided. Previously a bot could be created with no documents and would silently enter `status="ready"` with an empty vector store. The `has_docs` conditional branch is gone — indexing always runs on create.
+
 **Swagger UI file picker fix**
 FastAPI + Pydantic v2 emits `contentMediaType: application/octet-stream` for `UploadFile` fields (OpenAPI 3.1 style), but Swagger UI only renders a file-picker widget for `format: binary` (OpenAPI 3.0 style). Fixed in `main.py` via a custom `openapi()` override (`_patch_file_fields`) that post-processes the generated schema: replaces `contentMediaType` with `format: binary` and flattens `anyOf: [array, null]` into `array + nullable: true`. The app now serves OpenAPI 3.0.2.
 

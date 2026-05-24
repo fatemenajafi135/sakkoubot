@@ -97,7 +97,11 @@ async def create_bot(
             content = await f.read()
             file_payloads.append({"filename": f.filename, "content": content})
 
-    has_docs = bool(file_payloads or directory_path)
+    if not file_payloads and not directory_path:
+        raise HTTPException(
+            status_code=422,
+            detail="Provide at least one of: documents (file upload), directory_path",
+        )
 
     bot_id = str(uuid.uuid4())
     job_id = str(uuid.uuid4())
@@ -108,13 +112,13 @@ async def create_bot(
         bot_type=bot_type,
         document_count=0,
         is_active=False,
-        status="pending" if has_docs else "ready",
+        status="pending",
         created_at=datetime.utcnow(),
     )
     job = JobRecord(
         id=job_id,
         bot_id=bot_id,
-        status="pending" if has_docs else "completed",
+        status="pending",
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow(),
     )
@@ -122,15 +126,14 @@ async def create_bot(
     db.add(job)
     await db.commit()
 
-    if has_docs:
-        background_tasks.add_task(
-            _run_indexing, bot_id, job_id, file_payloads, directory_path, False
-        )
+    background_tasks.add_task(
+        _run_indexing, bot_id, job_id, file_payloads, directory_path, False
+    )
 
     return BotCreateResponse(
         bot_id=bot_id,
         job_id=job_id,
-        status="pending" if has_docs else "completed",
+        status="pending",
         name=name,
         bot_type=bot_type,
     )
