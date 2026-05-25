@@ -28,6 +28,8 @@ class BotRecord(Base):
     # "pending" | "indexing" | "ready" | "failed"
     status: Mapped[str] = mapped_column(String(20), default="ready")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    chunking_strategy: Mapped[str] = mapped_column(String(50), default="fixed")
+    chunk_delimiter: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
 
 
 class JobRecord(Base):

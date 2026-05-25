@@ -29,10 +29,22 @@ _llm = ChatOpenAI(
     temperature=0.1,
 )
 
-_splitter = RecursiveCharacterTextSplitter(
-    chunk_size=settings.chunk_size,
-    chunk_overlap=settings.chunk_overlap,
-)
+def _make_splitter(strategy: str, delimiter: str | None):
+    if strategy == "semantic":
+        from langchain_experimental.text_splitter import SemanticChunker
+        return SemanticChunker(_embeddings)
+    if strategy == "delimiter":
+        from langchain_text_splitters import CharacterTextSplitter
+        return CharacterTextSplitter(
+            separator=delimiter,
+            chunk_size=10_000_000,
+            chunk_overlap=0,
+            is_separator_regex=False,
+        )
+    return RecursiveCharacterTextSplitter(
+        chunk_size=settings.chunk_size,
+        chunk_overlap=settings.chunk_overlap,
+    )
 
 # ── Prompts ───────────────────────────────────────────────────────────────────
 
@@ -115,7 +127,7 @@ async def add_documents_to_bot(bot_id: str, files: list) -> int:
     if not all_docs:
         return 0
 
-    chunks = _splitter.split_documents(all_docs)
+    chunks = _make_splitter("fixed", None).split_documents(all_docs)
     vectorstore = _get_vectorstore(bot_id)
     vectorstore.add_documents(chunks)
 
@@ -129,6 +141,8 @@ def index_documents_sync(
     bot_id: str,
     file_payloads: list[dict],
     directory_path: str | None = None,
+    chunking_strategy: str = "fixed",
+    chunk_delimiter: str | None = None,
 ) -> int:
     """
     Synchronous, thread-safe document indexing.
@@ -175,10 +189,11 @@ def index_documents_sync(
     if not all_docs:
         return 0
 
-    chunks = _splitter.split_documents(all_docs)
-    print(f"[chunking] {len(chunks)} chunks from {len(all_docs)} source pages")
-    for i, chunk in enumerate(chunks):
-        print(f"  chunk[{i}]: {chunk.page_content[:50]!r}")
+    if chunking_strategy == "whole_document":
+        chunks = all_docs
+    else:
+        chunks = _make_splitter(chunking_strategy, chunk_delimiter).split_documents(all_docs)
+    print(f"[chunking] strategy={chunking_strategy} {len(chunks)} chunks from {len(all_docs)} source pages")
 
     vectorstore = _get_vectorstore(bot_id)
     vectorstore.add_documents(chunks)
@@ -214,7 +229,7 @@ def add_documents_from_directory(bot_id: str, dir_path: str) -> int:
     if not all_docs:
         return 0
 
-    chunks = _splitter.split_documents(all_docs)
+    chunks = _make_splitter("fixed", None).split_documents(all_docs)
     vectorstore = _get_vectorstore(bot_id)
     vectorstore.add_documents(chunks)
 

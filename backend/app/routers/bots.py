@@ -1,4 +1,5 @@
 import asyncio
+import functools
 from datetime import datetime
 import uuid
 
@@ -8,7 +9,7 @@ from sqlalchemy import select, update
 from typing import Optional, List
 
 from app.database import get_db, BotRecord, JobRecord, AsyncSessionLocal
-from app.models import BotResponse, BotCreateResponse, BotType
+from app.models import BotResponse, BotCreateResponse, BotType, ChunkingStrategy
 from app.services.rag import index_documents_sync, delete_bot_collection
 
 router = APIRouter(prefix="/bots", tags=["bots"])
@@ -20,6 +21,8 @@ async def _run_indexing(
     file_payloads: list[dict],
     directory_path: str | None,
     increment: bool = False,
+    chunking_strategy: str = "fixed",
+    chunk_delimiter: str | None = None,
 ) -> None:
     """Background task: runs document indexing in a thread, updates job + bot status in DB."""
     async with AsyncSessionLocal() as db:
@@ -35,9 +38,11 @@ async def _run_indexing(
 
     try:
         loop = asyncio.get_event_loop()
-        count = await loop.run_in_executor(
-            None, index_documents_sync, bot_id, file_payloads, directory_path
+        fn = functools.partial(
+            index_documents_sync, bot_id, file_payloads, directory_path,
+            chunking_strategy, chunk_delimiter,
         )
+        count = await loop.run_in_executor(None, fn)
 
         async with AsyncSessionLocal() as db:
             if increment:
@@ -78,6 +83,8 @@ async def create_bot(
     bot_type: BotType = Form(..., description="'resume' or 'rules'"),
     documents: Optional[List[UploadFile]] = File(default=None, description="Upload files directly (PDF, DOCX, TXT)"),
     directory_path: Optional[str] = Form(None, description="Server-side directory path — all supported docs inside will be ingested recursively"),
+    chunking_strategy: ChunkingStrategy = Form("fixed", description="How to split documents into chunks"),
+    chunk_delimiter: Optional[str] = Form(None, description="Delimiter string for the 'delimiter' strategy"),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -89,7 +96,19 @@ async def create_bot(
     Two ways to add documents (can be combined):
     - **documents**: upload individual files (PDF, DOCX, TXT)
     - **directory_path**: path to a folder on the server — every PDF/DOCX/TXT inside is indexed recursively
+
+    Chunking strategies:
+    - **fixed** (default): split by character count (chunk_size / chunk_overlap from config)
+    - **semantic**: split at natural semantic boundaries using embeddings
+    - **whole_document**: each uploaded file becomes a single chunk
+    - **delimiter**: split on a custom delimiter string (requires chunk_delimiter)
     """
+    if chunking_strategy == "delimiter" and not chunk_delimiter:
+        raise HTTPException(
+            status_code=422,
+            detail="chunk_delimiter is required when chunking_strategy is 'delimiter'",
+        )
+
     # Read file bytes NOW, while still inside the async request handler
     file_payloads = []
     for f in (documents or []):
@@ -114,6 +133,8 @@ async def create_bot(
         is_active=False,
         status="pending",
         created_at=datetime.utcnow(),
+        chunking_strategy=chunking_strategy,
+        chunk_delimiter=chunk_delimiter,
     )
     job = JobRecord(
         id=job_id,
@@ -127,7 +148,8 @@ async def create_bot(
     await db.commit()
 
     background_tasks.add_task(
-        _run_indexing, bot_id, job_id, file_payloads, directory_path, False
+        _run_indexing, bot_id, job_id, file_payloads, directory_path, False,
+        chunking_strategy, chunk_delimiter,
     )
 
     return BotCreateResponse(
@@ -248,7 +270,8 @@ async def add_documents(
     await db.commit()
 
     background_tasks.add_task(
-        _run_indexing, bot_id, job_id, file_payloads, directory_path, True
+        _run_indexing, bot_id, job_id, file_payloads, directory_path, True,
+        bot.chunking_strategy, bot.chunk_delimiter,
     )
 
     return BotCreateResponse(

@@ -46,6 +46,7 @@ backend/
 | Vector store | ChromaDB (persistent, one collection per bot) |
 | Metadata DB | SQLite via SQLAlchemy async |
 | Document loaders | PyPDF, Docx2txt, TextLoader (langchain-community) |
+| Semantic chunking | langchain-experimental (SemanticChunker) |
 
 ---
 
@@ -102,6 +103,17 @@ FastAPI + Pydantic v2 emits `contentMediaType: application/octet-stream` for `Up
 
 **Async bot creation (background indexing)**
 `POST /bots` and `POST /bots/{id}/documents` return HTTP 202 immediately with `{bot_id, job_id, status: "pending"}`. Document chunking and OpenAI embedding run in a background thread via FastAPI `BackgroundTasks` + `run_in_executor`. Poll `GET /jobs/{job_id}` to track progress (`pending → indexing → completed / failed`). The bot's `status` field mirrors this: `pending → indexing → ready / failed`. `POST /bots/{id}/set-active` rejects with 409 if the bot is not yet `ready`.
+
+**Per-bot chunking strategies**
+`POST /bots` accepts an optional `chunking_strategy` form field (default: `"fixed"`) and `chunk_delimiter`. Four strategies are supported:
+- `fixed` — `RecursiveCharacterTextSplitter` using `CHUNK_SIZE` / `CHUNK_OVERLAP` from config (original behaviour)
+- `semantic` — `SemanticChunker` from `langchain-experimental`; splits at natural semantic boundaries by calling the embedding model during ingestion
+- `whole_document` — each uploaded file is stored as a single chunk, no splitting
+- `delimiter` — `CharacterTextSplitter` splits on an arbitrary string (`chunk_delimiter`); requires `chunk_delimiter` to be provided (422 otherwise)
+
+The strategy and delimiter are persisted on `BotRecord` (`chunking_strategy`, `chunk_delimiter` columns). `POST /bots/{id}/documents` reuses the bot's stored strategy automatically so incremental uploads are consistent.
+
+> **DB migration note:** `create_all()` does not alter existing tables. Delete `data/sakkoubot.db` once after deploying this change so the new columns are created.
 
 **Chunk debug logging**
 `index_documents_sync` prints the total chunk count and the first 50 chars of each chunk to stdout during indexing — useful for verifying documents are parsed and split correctly.

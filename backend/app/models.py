@@ -3,6 +3,7 @@ from typing import Literal, Optional
 from datetime import datetime
 
 BotType = Literal["resume", "rules"]
+ChunkingStrategy = Literal["fixed", "semantic", "whole_document", "delimiter"]
 
 
 class BotResponse(BaseModel):
@@ -13,6 +14,8 @@ class BotResponse(BaseModel):
     document_count: int
     status: str
     created_at: datetime
+    chunking_strategy: str = "fixed"
+    chunk_delimiter: Optional[str] = None
 
     model_config = {"from_attributes": True}
 
