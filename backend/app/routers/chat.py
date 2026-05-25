@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
+from app.config import settings
 from app.database import get_db, BotRecord
 from app.models import ChatRequest, ChatResponse, SourceDocument
 from app.services.rag import query_bot
@@ -69,7 +70,7 @@ async def chat(request: ChatRequest, db: AsyncSession = Depends(get_db)):
 
     return ChatResponse(
         answer=answer,
-        sources=[SourceDocument(**s) for s in raw_sources],
+        sources=[SourceDocument(**s) for s in raw_sources] if settings.show_sources else [],
         bot_id=bot.id,
         bot_type=bot.bot_type,
     )

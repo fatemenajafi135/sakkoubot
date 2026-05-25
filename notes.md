@@ -94,6 +94,9 @@ Both can be used together in one request; counts accumulate. Bad paths return HT
 **At least one document required on bot creation**
 `POST /bots` now rejects with HTTP 422 if neither `documents` nor `directory_path` is provided. Previously a bot could be created with no documents and would silently enter `status="ready"` with an empty vector store. The `has_docs` conditional branch is gone — indexing always runs on create.
 
+**Source document visibility toggle**
+`SHOW_SOURCES` (`.env`, default `false`) controls whether the `sources` array in `POST /chat` responses is populated. When `false`, the array is always empty — the RAG retrieval still runs, only the response payload changes. Set `SHOW_SOURCES=true` to expose source titles, page numbers, and 300-char excerpts to the frontend.
+
 **Swagger UI file picker fix**
 FastAPI + Pydantic v2 emits `contentMediaType: application/octet-stream` for `UploadFile` fields (OpenAPI 3.1 style), but Swagger UI only renders a file-picker widget for `format: binary` (OpenAPI 3.0 style). Fixed in `main.py` via a custom `openapi()` override (`_patch_file_fields`) that post-processes the generated schema: replaces `contentMediaType` with `format: binary` and flattens `anyOf: [array, null]` into `array + nullable: true`. The app now serves OpenAPI 3.0.2.
 
@@ -144,6 +147,7 @@ uv run uvicorn app.main:app --reload
 | `CHUNK_SIZE` | `1000` | Document chunk size (chars) |
 | `CHUNK_OVERLAP` | `200` | Chunk overlap |
 | `RETRIEVAL_K` | `5` | Number of chunks retrieved per query |
+| `SHOW_SOURCES` | `false` | Include retrieved source excerpts in chat responses |
 | `CHROMA_PERSIST_DIR` | `./data/chroma` | ChromaDB storage path |
 | `DB_URL` | `sqlite+aiosqlite:///./data/sakkoubot.db` | SQLite path |
 | `CORS_ORIGINS` | localhost variants | Allowed frontend origins |

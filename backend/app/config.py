@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     chunk_size: int = 1000
     chunk_overlap: int = 200
     retrieval_k: int = 5
+    show_sources: bool = False
 
     # CORS
     cors_origins: list[str] = [
