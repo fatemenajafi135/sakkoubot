@@ -8,8 +8,8 @@ A bot for Sakkou co-working space members and Guilan Incubation Center
 ```bash
 cd backend
 cp .env.example .env   # fill in your API keys
-pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
+uv sync
+uv run uvicorn app.main:app --reload --port 8000
 ```
 
 API docs (Swagger): http://localhost:8000/docs
