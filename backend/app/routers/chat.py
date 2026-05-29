@@ -62,6 +62,7 @@ async def chat(request: ChatRequest, db: AsyncSession = Depends(get_db)):
         bot_id=bot.id,
         question=request.message,
         chat_history=request.chat_history,
+        bot_type=bot.bot_type,
     )
 
     print(f"[chat] answer    : {answer[:120]!r}{'…' if len(answer) > 120 else ''}")
