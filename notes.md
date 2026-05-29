@@ -106,11 +106,19 @@ FastAPI + Pydantic v2 emits `contentMediaType: application/octet-stream` for `Up
 `POST /bots` and `POST /bots/{id}/documents` return HTTP 202 immediately with `{bot_id, job_id, status: "pending"}`. Document chunking and OpenAI embedding run in a background thread via FastAPI `BackgroundTasks` + `run_in_executor`. Poll `GET /jobs/{job_id}` to track progress (`pending → indexing → completed / failed`). The bot's `status` field mirrors this: `pending → indexing → ready / failed`. `POST /bots/{id}/set-active` rejects with 409 if the bot is not yet `ready`.
 
 **Per-bot chunking strategies**
-`POST /bots` accepts an optional `chunking_strategy` form field (default: `"fixed"`) and `chunk_delimiter`. Four strategies are supported:
+`POST /bots` accepts an optional `chunking_strategy` form field (default: `"fixed"`) and `chunk_delimiter`. Five strategies are supported:
 - `fixed` — `RecursiveCharacterTextSplitter` using `CHUNK_SIZE` / `CHUNK_OVERLAP` from config (original behaviour)
 - `semantic` — `SemanticChunker` from `langchain-experimental`; splits at natural semantic boundaries by calling the embedding model during ingestion
 - `whole_document` — each uploaded file is stored as a single chunk, no splitting
 - `delimiter` — `CharacterTextSplitter` splits on an arbitrary string (`chunk_delimiter`); requires `chunk_delimiter` to be provided (422 otherwise)
+- `legal_aware` — smart per-document strategy designed for Persian regulatory documents mixed with general docs in the same bot:
+  - Detects each file independently: if the document contains ≥2 `ماده` markers (supports both Persian ۱-۹ and ASCII 1-9 digits), it's treated as a structured legal doc; otherwise it falls back to `RecursiveCharacterTextSplitter`.
+  - Legal docs are split on article boundaries using a lookahead regex so each chunk begins with its `ماده N` header. تبصره clauses stay grouped with their parent article (they are not split off).
+  - فصل (chapter) headings are tracked and injected into each chunk's header for context: `[filename] · فصل X · ماده N`.
+  - Articles exceeding ~6 000 chars are sub-split with `RecursiveCharacterTextSplitter`; each sub-chunk re-prepends the article header so it remains self-identifying. A `part` metadata field marks e.g. `"1/3"`.
+  - Every chunk carries `chunk_type` (`legal` / `legal_preamble` / `general`), `article_number` (ASCII-normalized), `chapter`, and `raw_body` (clean body without the header, for display and reranking).
+  - Preamble text before the first `ماده` becomes its own `legal_preamble` chunk.
+  - The `[legal_aware]` log line at indexing time reports the per-doc classification: e.g. `classified: 2 legal doc(s), 2 general doc(s) → 47 chunks total`.
 
 The strategy and delimiter are persisted on `BotRecord` (`chunking_strategy`, `chunk_delimiter` columns). `POST /bots/{id}/documents` reuses the bot's stored strategy automatically so incremental uploads are consistent.
 

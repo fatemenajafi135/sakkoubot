@@ -1,5 +1,6 @@
 import io
 import os
+import re
 import tempfile
 from pathlib import Path
 
@@ -10,6 +11,7 @@ from langchain_classic.chains import create_history_aware_retriever, create_retr
 from langchain_classic.chains.combine_documents import create_stuff_documents_chain
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import HumanMessage as LCHumanMessage, AIMessage as LCAIMessage
+from langchain_core.documents import Document
 from langchain_community.document_loaders import PyPDFLoader, TextLoader, Docx2txtLoader
 import chromadb
 
@@ -46,6 +48,128 @@ def _make_splitter(strategy: str, delimiter: str | None):
         chunk_size=settings.chunk_size,
         chunk_overlap=settings.chunk_overlap,
     )
+
+# ── Legal-aware chunking helpers ─────────────────────────────────────────────
+
+# Matches article headers with Persian (۰-۹ / ٠-٩) or ASCII digits
+_ARTICLE_RE = re.compile(r"^\s*ماده\s+[۰-۹٠-٩\d]+", re.MULTILINE)
+_ARTICLE_SPLIT_RE = re.compile(r"(?=^\s*ماده\s+[۰-۹٠-٩\d]+)", re.MULTILINE)
+_CHAPTER_RE = re.compile(r"^\s*فصل\s+\S+", re.MULTILINE)
+
+# Translate table: Persian/Arabic-Indic digits → ASCII digits
+_FA_DIGITS = "۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩"
+_EN_DIGITS = "01234567890123456789"
+_FA_TO_EN = str.maketrans(_FA_DIGITS, _EN_DIGITS)
+
+_LEGAL_ARTICLE_THRESHOLD = 2
+# Rough upper bound before sub-splitting a single article (chars, not tokens)
+_MAX_ARTICLE_CHARS = 6_000
+
+
+def _normalize_digits(s: str) -> str:
+    return s.translate(_FA_TO_EN)
+
+
+def _build_chapter_map(text: str) -> list[tuple[int, str]]:
+    """Return [(char_offset, chapter_label), ...] sorted by offset."""
+    return [(m.start(), m.group().strip()) for m in _CHAPTER_RE.finditer(text)]
+
+
+def _chapter_at(offset: int, chapter_map: list[tuple[int, str]]) -> str | None:
+    label = None
+    for pos, ch in chapter_map:
+        if pos <= offset:
+            label = ch
+        else:
+            break
+    return label
+
+
+def _chunk_legal_aware(docs: list) -> list:
+    """
+    Per-document detection and splitting:
+    - Docs with ≥2 ماده markers → split by article, keep تبصره grouped.
+    - Other docs → RecursiveCharacterTextSplitter fallback.
+    Prepends a short identifying header to each chunk for retrieval quality.
+    """
+    fallback_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=settings.chunk_size,
+        chunk_overlap=settings.chunk_overlap,
+    )
+
+    # Group pages by source file so we operate on the full document text.
+    groups: dict[str, list] = {}
+    for doc in docs:
+        key = doc.metadata.get("source_filename", "__unknown__")
+        groups.setdefault(key, []).append(doc)
+
+    result: list[Document] = []
+    legal_count = 0
+    general_count = 0
+
+    for filename, pages in groups.items():
+        full_text = "\n".join(p.page_content for p in pages)
+        base_meta = {k: v for k, v in pages[0].metadata.items()
+                     if k not in ("page",)}
+
+        article_matches = _ARTICLE_RE.findall(full_text)
+
+        if len(article_matches) >= _LEGAL_ARTICLE_THRESHOLD:
+            legal_count += 1
+            chapter_map = _build_chapter_map(full_text)
+            segments = _ARTICLE_SPLIT_RE.split(full_text)
+
+            for seg in segments:
+                seg = seg.strip()
+                if not seg:
+                    continue
+
+                art_match = _ARTICLE_RE.match(seg)
+                if art_match:
+                    # Extract article number, normalize to ASCII
+                    raw_num = re.search(r"[۰-۹٠-٩\d]+", art_match.group())
+                    art_num = _normalize_digits(raw_num.group()) if raw_num else None
+                    chapter = _chapter_at(full_text.find(seg), chapter_map)
+
+                    # Build header
+                    parts = [f"[{filename}]"]
+                    if chapter:
+                        parts.append(chapter)
+                    if art_num:
+                        parts.append(f"ماده {art_num}")
+                    header = " · ".join(parts)
+                    chunk_meta = {**base_meta, "chunk_type": "legal",
+                                  "article_number": art_num, "chapter": chapter}
+                else:
+                    # Preamble before first ماده
+                    header = f"[{filename}] · مقدمه"
+                    chunk_meta = {**base_meta, "chunk_type": "legal_preamble",
+                                  "article_number": None, "chapter": None}
+
+                body = f"{header}\n\n{seg}"
+
+                if len(seg) > _MAX_ARTICLE_CHARS:
+                    # Sub-split oversized articles
+                    sub_docs = fallback_splitter.create_documents([body], metadatas=[chunk_meta])
+                    for i, sd in enumerate(sub_docs):
+                        sd.metadata["part"] = f"{i + 1}/{len(sub_docs)}"
+                        sd.metadata["raw_body"] = seg
+                    result.extend(sub_docs)
+                else:
+                    doc = Document(page_content=body, metadata={**chunk_meta, "raw_body": seg})
+                    result.append(doc)
+        else:
+            general_count += 1
+            header = f"[{filename}]"
+            headed = f"{header}\n\n{full_text}"
+            sub_docs = fallback_splitter.create_documents(
+                [headed], metadatas=[{**base_meta, "chunk_type": "general", "raw_body": full_text}]
+            )
+            result.extend(sub_docs)
+
+    print(f"[legal_aware] classified: {legal_count} legal doc(s), {general_count} general doc(s) → {len(result)} chunks total")
+    return result
+
 
 # ── Prompts ───────────────────────────────────────────────────────────────────
 
@@ -203,6 +327,8 @@ def index_documents_sync(
 
     if chunking_strategy == "whole_document":
         chunks = all_docs
+    elif chunking_strategy == "legal_aware":
+        chunks = _chunk_legal_aware(all_docs)
     else:
         chunks = _make_splitter(chunking_strategy, chunk_delimiter).split_documents(all_docs)
     print(f"[chunking] strategy={chunking_strategy} {len(chunks)} chunks from {len(all_docs)} source pages")
