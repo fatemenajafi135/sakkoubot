@@ -68,7 +68,29 @@ def _patch_file_fields(obj: Any) -> Any:
                 merged["nullable"] = True
             return merged
 
-    return {k: _patch_file_fields(v) for k, v in obj.items()}
+    result = {k: _patch_file_fields(v) for k, v in obj.items()}
+
+    # FastAPI + Pydantic v2 sometimes marks Optional[List[UploadFile]] fields as
+    # required even when default=None; Swagger UI then refuses submission without a
+    # file.  Strip nullable file-upload array fields from the required[] list.
+    if "required" in result and "properties" in result:
+        props = result["properties"]
+
+        def _is_optional_file_array(name: str) -> bool:
+            s = props.get(name, {})
+            return (
+                s.get("nullable")
+                and s.get("type") == "array"
+                and s.get("items", {}).get("format") == "binary"
+            )
+
+        required = [n for n in result["required"] if not _is_optional_file_array(n)]
+        if required:
+            result["required"] = required
+        else:
+            del result["required"]
+
+    return result
 
 
 def custom_openapi():

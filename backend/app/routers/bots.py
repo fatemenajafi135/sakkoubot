@@ -19,7 +19,6 @@ async def _run_indexing(
     bot_id: str,
     job_id: str,
     file_payloads: list[dict],
-    directory_path: str | None,
     increment: bool = False,
     chunking_strategy: str = "fixed",
     chunk_delimiter: str | None = None,
@@ -39,7 +38,7 @@ async def _run_indexing(
     try:
         loop = asyncio.get_event_loop()
         fn = functools.partial(
-            index_documents_sync, bot_id, file_payloads, directory_path,
+            index_documents_sync, bot_id, file_payloads,
             chunking_strategy, chunk_delimiter,
         )
         count = await loop.run_in_executor(None, fn)
@@ -81,8 +80,7 @@ async def create_bot(
     background_tasks: BackgroundTasks,
     name: str = Form(..., description="Display name for this bot instance"),
     bot_type: BotType = Form(..., description="'resume' or 'rules'"),
-    documents: Optional[List[UploadFile]] = File(default=None, description="Upload files directly (PDF, DOCX, TXT)"),
-    directory_path: Optional[str] = Form(None, description="Server-side directory path — all supported docs inside will be ingested recursively"),
+    documents: Optional[List[UploadFile]] = File(default=None, description="Upload files (PDF, DOCX, TXT, or ZIP archives containing those formats)"),
     chunking_strategy: ChunkingStrategy = Form("fixed", description="How to split documents into chunks"),
     chunk_delimiter: Optional[str] = Form(None, description="Delimiter string for the 'delimiter' strategy"),
     db: AsyncSession = Depends(get_db),
@@ -93,9 +91,9 @@ async def create_bot(
     Document indexing runs in the background — poll `GET /jobs/{job_id}` to track progress.
     The bot is ready to chat once `job.status == "completed"`.
 
-    Two ways to add documents (can be combined):
-    - **documents**: upload individual files (PDF, DOCX, TXT)
-    - **directory_path**: path to a folder on the server — every PDF/DOCX/TXT inside is indexed recursively
+    Supported upload formats:
+    - **PDF, DOCX, TXT**: indexed directly
+    - **ZIP**: extracted server-side; every PDF/DOCX/TXT inside is indexed
 
     Chunking strategies:
     - **fixed** (default): split by character count (chunk_size / chunk_overlap from config)
@@ -116,10 +114,10 @@ async def create_bot(
             content = await f.read()
             file_payloads.append({"filename": f.filename, "content": content})
 
-    if not file_payloads and not directory_path:
+    if not file_payloads:
         raise HTTPException(
             status_code=422,
-            detail="Provide at least one of: documents (file upload), directory_path",
+            detail="Provide at least one document (PDF, DOCX, TXT, or ZIP).",
         )
 
     bot_id = str(uuid.uuid4())
@@ -148,7 +146,7 @@ async def create_bot(
     await db.commit()
 
     background_tasks.add_task(
-        _run_indexing, bot_id, job_id, file_payloads, directory_path, False,
+        _run_indexing, bot_id, job_id, file_payloads, False,
         chunking_strategy, chunk_delimiter,
     )
 
@@ -232,13 +230,13 @@ async def set_active_bot(bot_id: str, db: AsyncSession = Depends(get_db)):
 async def add_documents(
     bot_id: str,
     background_tasks: BackgroundTasks,
-    documents: Optional[List[UploadFile]] = File(default=None, description="Upload files directly (PDF, DOCX, TXT)"),
-    directory_path: Optional[str] = Form(None, description="Server-side directory path — all supported docs inside will be ingested recursively"),
+    documents: Optional[List[UploadFile]] = File(default=None, description="Upload files (PDF, DOCX, TXT, or ZIP archives containing those formats)"),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Add more documents to an existing bot. Returns immediately with a `job_id`.
     Poll `GET /jobs/{job_id}` to track indexing progress.
+    ZIP archives are extracted server-side; every PDF/DOCX/TXT inside is indexed.
     """
     result = await db.execute(select(BotRecord).where(BotRecord.id == bot_id))
     bot = result.scalar_one_or_none()
@@ -251,10 +249,10 @@ async def add_documents(
             content = await f.read()
             file_payloads.append({"filename": f.filename, "content": content})
 
-    if not file_payloads and not directory_path:
+    if not file_payloads:
         raise HTTPException(
             status_code=422,
-            detail="Provide at least one of: documents (file upload), directory_path",
+            detail="Provide at least one document (PDF, DOCX, TXT, or ZIP).",
         )
 
     job_id = str(uuid.uuid4())
@@ -270,7 +268,7 @@ async def add_documents(
     await db.commit()
 
     background_tasks.add_task(
-        _run_indexing, bot_id, job_id, file_payloads, directory_path, True,
+        _run_indexing, bot_id, job_id, file_payloads, True,
         bot.chunking_strategy, bot.chunk_delimiter,
     )
 

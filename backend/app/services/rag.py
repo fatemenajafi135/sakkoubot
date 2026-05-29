@@ -1,3 +1,4 @@
+import io
 import os
 import tempfile
 from pathlib import Path
@@ -137,54 +138,65 @@ async def add_documents_to_bot(bot_id: str, files: list) -> int:
 _SUPPORTED_SUFFIXES = {".pdf", ".docx", ".doc", ".txt"}
 
 
+def _load_payload(payload: dict) -> list:
+    """Load docs from a single file payload; expands .zip archives automatically."""
+    import zipfile
+
+    filename = payload["filename"]
+    content = payload["content"]
+    suffix = Path(filename).suffix.lower()
+
+    if suffix == ".zip":
+        docs = []
+        with zipfile.ZipFile(io.BytesIO(content)) as zf:
+            for entry in sorted(zf.namelist()):
+                print(entry)
+                entry_suffix = Path(entry).suffix.lower()
+                if entry_suffix not in _SUPPORTED_SUFFIXES:
+                    continue
+                entry_name = Path(entry).name
+                entry_bytes = zf.read(entry)
+                with tempfile.NamedTemporaryFile(delete=False, suffix=entry_suffix) as tmp:
+                    tmp.write(entry_bytes)
+                    tmp_path = tmp.name
+                try:
+                    entry_docs = _load_file(tmp_path, entry_name)
+                    for doc in entry_docs:
+                        doc.metadata["source_filename"] = entry_name
+                        doc.metadata["zip_source"] = filename
+                    docs.extend(entry_docs)
+                finally:
+                    os.unlink(tmp_path)
+        return docs
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        tmp.write(content)
+        tmp_path = tmp.name
+    try:
+        docs = _load_file(tmp_path, filename)
+        for doc in docs:
+            doc.metadata["source_filename"] = filename
+        return docs
+    finally:
+        os.unlink(tmp_path)
+
+
 def index_documents_sync(
     bot_id: str,
     file_payloads: list[dict],
-    directory_path: str | None = None,
     chunking_strategy: str = "fixed",
     chunk_delimiter: str | None = None,
 ) -> int:
     """
     Synchronous, thread-safe document indexing.
-    file_payloads: list of {"filename": str, "content": bytes} (bytes already read before background task starts)
-    Returns total number of source files loaded.
+    file_payloads: list of {"filename": str, "content": bytes}.
+    ZIP archives are extracted and each supported file inside is indexed.
+    Returns total number of source documents loaded.
     Safe to call from a background thread via run_in_executor.
     """
     all_docs = []
-
     for payload in file_payloads:
-        filename = payload["filename"]
-        content = payload["content"]
-        suffix = Path(filename).suffix.lower()
-
-        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-            tmp.write(content)
-            tmp_path = tmp.name
-
-        try:
-            docs = _load_file(tmp_path, filename)
-            for doc in docs:
-                doc.metadata["source_filename"] = filename
-            all_docs.extend(docs)
-        finally:
-            os.unlink(tmp_path)
-
-    if directory_path:
-        p = Path(directory_path)
-        if not p.exists():
-            raise ValueError(f"Directory not found: {directory_path}")
-        if not p.is_dir():
-            raise ValueError(f"Path is not a directory: {directory_path}")
-        for file_path in sorted(p.rglob("*")):
-            if not file_path.is_file():
-                continue
-            if file_path.suffix.lower() not in _SUPPORTED_SUFFIXES:
-                continue
-            docs = _load_file(str(file_path), file_path.name)
-            for doc in docs:
-                doc.metadata["source_filename"] = file_path.name
-                doc.metadata["source_path"] = str(file_path)
-            all_docs.extend(docs)
+        all_docs.extend(_load_payload(payload))
 
     if not all_docs:
         return 0
@@ -195,41 +207,6 @@ def index_documents_sync(
         chunks = _make_splitter(chunking_strategy, chunk_delimiter).split_documents(all_docs)
     print(f"[chunking] strategy={chunking_strategy} {len(chunks)} chunks from {len(all_docs)} source pages")
 
-    vectorstore = _get_vectorstore(bot_id)
-    vectorstore.add_documents(chunks)
-
-    return len(all_docs)
-
-
-def add_documents_from_directory(bot_id: str, dir_path: str) -> int:
-    """
-    Walk dir_path recursively, load every supported file (PDF/DOCX/TXT),
-    chunk and index into the bot's Chroma collection.
-    Returns the number of source files loaded.
-    """
-    p = Path(dir_path)
-    if not p.exists():
-        raise ValueError(f"Directory not found: {dir_path}")
-    if not p.is_dir():
-        raise ValueError(f"Path is not a directory: {dir_path}")
-
-    all_docs = []
-    for file_path in sorted(p.rglob("*")):
-        if not file_path.is_file():
-            continue
-        if file_path.suffix.lower() not in _SUPPORTED_SUFFIXES:
-            continue
-
-        docs = _load_file(str(file_path), file_path.name)
-        for doc in docs:
-            doc.metadata["source_filename"] = file_path.name
-            doc.metadata["source_path"] = str(file_path)
-        all_docs.extend(docs)
-
-    if not all_docs:
-        return 0
-
-    chunks = _make_splitter("fixed", None).split_documents(all_docs)
     vectorstore = _get_vectorstore(bot_id)
     vectorstore.add_documents(chunks)
 

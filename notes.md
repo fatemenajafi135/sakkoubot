@@ -54,12 +54,12 @@ backend/
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/bots` | Create a bot; seed docs via file upload and/or a server-side directory path |
+| `POST` | `/bots` | Create a bot; seed docs via file upload (PDF/DOCX/TXT/ZIP) |
 | `GET` | `/bots` | List all bots (filterable by `?bot_type=`) |
 | `GET` | `/bots/{id}` | Get a specific bot |
 | `POST` | `/bots/{id}/set-active` | Set this bot as the active one for its type |
 | `GET` | `/bots/active/{bot_type}` | Get the currently active bot for a type |
-| `POST` | `/bots/{id}/documents` | Upload files or point to a server-side directory (async, returns job_id) |
+| `POST` | `/bots/{id}/documents` | Upload files (PDF/DOCX/TXT/ZIP); ZIP archives are extracted automatically (async, returns job_id) |
 | `DELETE` | `/bots/{id}` | Delete a bot and its vector store |
 | `POST` | `/chat` | Send a message; select bot by `bot_type` or `bot_id` |
 | `GET` | `/jobs/{job_id}` | Poll background indexing job status |
@@ -85,12 +85,13 @@ Uses LangChain's history-aware retrieval (LCEL):
 3. A QA prompt feeds the context + history to the LLM to produce a grounded answer.
 4. Source documents (filename, page, excerpt) are returned alongside the answer.
 
-**Document ingestion — two modes**
-Both `POST /bots` and `POST /bots/{id}/documents` accept:
-- `documents` (multipart file upload) — individual PDF/DOCX/TXT files selected via file picker
-- `directory_path` (form string) — a server-side folder; all supported files inside are indexed **recursively**
+**Document ingestion — upload files including ZIP archives**
+Both `POST /bots` and `POST /bots/{id}/documents` accept `documents` (multipart file upload):
+- `PDF`, `DOCX`, `TXT` — indexed directly
+- `ZIP` — extracted server-side; every PDF/DOCX/TXT inside is indexed recursively (subdirectories included)
 
-Both can be used together in one request; counts accumulate. Bad paths return HTTP 400.
+`directory_path` has been removed. ZIP archives replace it as the way to batch-upload many files at once.
+Extracted files carry `source_filename` (the file's own name) and `zip_source` (the archive name) in their metadata.
 
 **At least one document required on bot creation**
 `POST /bots` now rejects with HTTP 422 if neither `documents` nor `directory_path` is provided. Previously a bot could be created with no documents and would silently enter `status="ready"` with an empty vector store. The `has_docs` conditional branch is gone — indexing always runs on create.
