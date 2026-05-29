@@ -15,7 +15,7 @@ const SELECTOR_CSS = `
 .sel-topbar {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: flex-start;
   margin-bottom: clamp(20px, 4vh, 40px);
   min-height: 32px;
 }
@@ -204,19 +204,47 @@ const SELECTOR_CSS = `
 }
 [dir="rtl"] .sel-card-cta svg { transform: scaleX(-1); }
 [dir="rtl"] .sel-card:hover .sel-card-cta svg { transform: scaleX(-1) translateX(4px); }
+
+.sel-footer {
+  margin-top: auto;
+  padding-top: clamp(24px, 4vh, 48px);
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-faint);
+  letter-spacing: 0.02em;
+}
+.sel-footer b {
+  color: var(--text-muted);
+  font-weight: 600;
+}
 `;
 
+const API_BASE = "http://localhost:8000";
+
+function toPersianDigits(n) {
+  return String(n).replace(/\d/g, (d) => "۰۱۲۳۴۵۶۷۸۹"[d]);
+}
+
 function Selector({ bots, onPick }) {
-  const stats = {
-    resume: [
-      { label: "رزومه", value: "۲۴۸" },
-      { label: "حوزه‌ی تخصص", value: "۳۲" }
-    ],
-    rules: [
-      { label: "سند", value: "۴۱" },
-      { label: "ماده و تبصره", value: "۳۱۲" }
-    ]
-  };
+  const [docCounts, setDocCounts] = React.useState({ resume: null, rules: null });
+
+  React.useEffect(() => {
+    ["resume", "rules"].forEach((type) => {
+      fetch(`${API_BASE}/bots/active/${type}`)
+        .then((r) => r.ok ? r.json() : null)
+        .then((data) => {
+          if (data && data.document_count != null) {
+            setDocCounts((prev) => ({ ...prev, [type]: data.document_count }));
+          }
+        })
+        .catch(() => {});
+    });
+  }, []);
+
+  const STAT_LABEL = { resume: "رزومه", rules: "سند" };
+
+  const statValue = (type) =>
+    docCounts[type] == null ? "—" : toPersianDigits(docCounts[type]);
 
   return (
     <>
@@ -226,7 +254,7 @@ function Selector({ bots, onPick }) {
         <header className="sel-topbar">
           <div className="sel-meta">
             <span className="dot"></span>
-            <span>مرکز رشد گیلان</span>
+            <span>پارک علمی و فناوری گیلان</span>
           </div>
         </header>
 
@@ -239,7 +267,7 @@ function Selector({ bots, onPick }) {
           <h1 className="sel-title">
             <span>سکو</span><span className="sel-title-accent">بات</span>
           </h1>
-          <p className="sel-sub">یک دستیار برای دانش مرکز رشد</p>
+          <p className="sel-sub">دستیاری برای مرکز رشد، پارک علمی و فناوری گیلان و فضای کار اشتراکی سکو</p>
         </section>
 
         <div className="sel-cards" role="list">
@@ -264,11 +292,9 @@ function Selector({ bots, onPick }) {
 
               <div className="sel-card-foot">
                 <div className="sel-card-stats">
-                  {stats[b.id].map((s) => (
-                    <span key={s.label}>
-                      <b>{s.value}</b>{s.label}
-                    </span>
-                  ))}
+                  <span>
+                    <b>{statValue(b.id)}</b>{STAT_LABEL[b.id]}
+                  </span>
                 </div>
                 <span className="sel-card-cta">
                   شروع گفتگو
@@ -280,6 +306,10 @@ function Selector({ bots, onPick }) {
             </button>
           ))}
         </div>
+
+        <footer className="sel-footer">
+          Powered by <b>Sakkou</b>'s members
+        </footer>
       </div>
     </>
   );
