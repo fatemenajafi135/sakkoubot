@@ -170,6 +170,25 @@ SQLite stored data in `./data/sakkoubot.db` on the local filesystem, which Verce
 - `main.py`: removed `./data` directory creation (no local storage needed anymore).
 - All SQLAlchemy ORM code (models, queries, session patterns) was already dialect-agnostic — zero changes needed to routers or models.
 
+**Vercel deployment setup (step 3)**
+Two separate Vercel projects — one for the FastAPI backend, one for the static frontend.
+
+*Backend project* (`backend/` as root directory):
+- `backend/requirements.txt` — generated with `uv export --no-hashes`; Vercel uses `pip` not `uv`. The `-e .` self-reference is removed since `app/` is importable directly from the project root.
+- `backend/api/index.py` — one-liner (`from app.main import app`) that Vercel's `@vercel/python` runtime uses as the ASGI handler.
+- `backend/vercel.json` — routes all `GET/POST/...` requests to `api/index.py`.
+- CORS: set `CORS_ORIGINS=["https://your-frontend.vercel.app"]` as an env var in the backend Vercel project after the frontend is deployed.
+
+*Frontend project* (`frontend/` as root directory):
+- `frontend/config.js` — sets `window.SAKKOUBOT_API_BASE`; auto-detects `localhost` (→ `http://localhost:8000`) vs. production (→ backend's Vercel URL). Update the production URL in this file before deploying the frontend.
+- `frontend/index.html` — loads `config.js` via `<script>` before the JSX files.
+- `frontend/chat.jsx` + `frontend/selector.jsx` — `API_BASE` changed from a hardcoded string to `window.SAKKOUBOT_API_BASE || "http://localhost:8000"`.
+- `frontend/vercel.json` — minimal static-site marker (`{"version": 2}`); Vercel serves `index.html` from the root with no build step.
+
+*Deployment order*: deploy backend first → copy its `.vercel.app` URL into `config.js` → set `CORS_ORIGINS` in backend env vars → deploy frontend.
+
+*Limitation*: Vercel Hobby tier has a 10-second function timeout. Chat queries are typically fine; large document indexing jobs may exceed this and require the Pro tier (300 s).
+
 **Storage**
 - Bot metadata (id, name, type, active flag, document count, status) lives in Neon PostgreSQL (`bots` table).
 - Indexing job records (id, bot_id, status, error) also in Neon PostgreSQL (`jobs` table).
