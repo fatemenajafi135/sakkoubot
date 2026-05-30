@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     embedding_dimension: int = 1536  # must match openai_embedding_model output size
 
     # Storage
-    db_url: str = "sqlite+aiosqlite:///./data/sakkoubot.db"
+    db_url: str  # required — set DB_URL in .env (postgresql+asyncpg://...)
 
     # RAG tuning
     chunk_size: int = 1000

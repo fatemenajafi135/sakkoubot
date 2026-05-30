@@ -160,9 +160,19 @@ ChromaDB required a local persistent directory (`./data/chroma/`), which is inco
 - Collection naming is unchanged: `bot_{bot_id}` with hyphens replaced by underscores.
 - `main.py` no longer creates the `./data/chroma/` directory on startup.
 
+**SQLite → Neon PostgreSQL 18 migration (Vercel step 2)**
+SQLite stored data in `./data/sakkoubot.db` on the local filesystem, which Vercel discards on each deployment. Replaced with Neon Cloud (hosted PostgreSQL 18):
+- `aiosqlite` removed; `asyncpg` added as the async PostgreSQL driver.
+- `database.py` engine uses `NullPool` (no persistent connection pool) — correct for Vercel serverless where processes don't stay alive between requests and Neon's free tier has a 10-connection limit.
+- `connect_args={"ssl": True}` satisfies Neon's mandatory TLS requirement.
+- URL normalization in `database.py` rewrites `postgresql://` → `postgresql+asyncpg://` and strips `?sslmode=require` automatically, so the raw Neon connection string can be pasted into `.env` as-is.
+- `config.py`: `db_url` has no default — the server fails loudly at startup if `DB_URL` is missing.
+- `main.py`: removed `./data` directory creation (no local storage needed anymore).
+- All SQLAlchemy ORM code (models, queries, session patterns) was already dialect-agnostic — zero changes needed to routers or models.
+
 **Storage**
-- Bot metadata (id, name, type, active flag, document count, status) lives in SQLite.
-- Indexing job records (id, bot_id, status, error) also in SQLite (`jobs` table).
+- Bot metadata (id, name, type, active flag, document count, status) lives in Neon PostgreSQL (`bots` table).
+- Indexing job records (id, bot_id, status, error) also in Neon PostgreSQL (`jobs` table).
 - Embeddings live in Qdrant Cloud under a collection named `bot_{id}`.
 - Deleting a bot cleans up both.
 
@@ -172,7 +182,7 @@ ChromaDB required a local persistent directory (`./data/chroma/`), which is inco
 
 ```bash
 cd backend
-cp .env.example .env      # add OPENAI_API_KEY, QDRANT_URL, QDRANT_API_KEY
+cp .env.example .env      # add OPENAI_API_KEY, QDRANT_URL, QDRANT_API_KEY, DB_URL
 uv sync                   # install dependencies
 uv run uvicorn app.main:app --reload
 # Swagger UI at http://localhost:8000/docs
@@ -193,5 +203,5 @@ uv run uvicorn app.main:app --reload
 | `QDRANT_URL` | — | Required — Qdrant Cloud cluster URL |
 | `QDRANT_API_KEY` | — | Required — Qdrant Cloud API key |
 | `EMBEDDING_DIMENSION` | `1536` | Vector size; must match the embedding model (text-embedding-3-small = 1536) |
-| `DB_URL` | `sqlite+aiosqlite:///./data/sakkoubot.db` | SQLite path |
+| `DB_URL` | — | Required — Neon connection string (paste as-is; scheme and sslmode are normalized automatically) |
 | `CORS_ORIGINS` | localhost variants | Allowed frontend origins |

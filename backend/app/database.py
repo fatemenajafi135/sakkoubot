@@ -1,13 +1,30 @@
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy import String, Boolean, DateTime, Integer, Text
+from sqlalchemy.pool import NullPool
 from datetime import datetime
 from typing import Optional
 import uuid
 
 from app.config import settings
 
-engine = create_async_engine(settings.db_url, echo=False)
+# Normalize the URL so users can paste the Neon string as-is:
+# - postgresql:// or postgres:// → postgresql+asyncpg://
+# - strip ?sslmode=require (asyncpg doesn't accept it in the URL)
+_db_url = settings.db_url
+for prefix in ("postgres://", "postgresql://"):
+    if _db_url.startswith(prefix):
+        _db_url = "postgresql+asyncpg://" + _db_url[len(prefix):]
+        break
+if "?" in _db_url:
+    _db_url = _db_url.split("?")[0]
+
+engine = create_async_engine(
+    _db_url,
+    connect_args={"ssl": True},
+    poolclass=NullPool,
+    echo=False,
+)
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 
