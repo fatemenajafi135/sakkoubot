@@ -180,12 +180,13 @@ Two separate Vercel projects — one for the FastAPI backend, one for the static
 - CORS: set `CORS_ORIGINS=["https://your-frontend.vercel.app"]` as an env var in the backend Vercel project after the frontend is deployed.
 
 *Frontend project* (`frontend/` as root directory):
-- `frontend/config.js` — sets `window.SAKKOUBOT_API_BASE`; auto-detects `localhost` (→ `http://localhost:8000`) vs. production (→ backend's Vercel URL). Update the production URL in this file before deploying the frontend.
+- `frontend/config.js` — gitignored (same pattern as `.env`); sets `window.SAKKOUBOT_API_BASE = 'http://localhost:8000'` for local dev. Never committed.
+- `frontend/config.example.js` — committed template (same role as `.env.example`); copy to `config.js` for local dev.
 - `frontend/index.html` — loads `config.js` via `<script>` before the JSX files.
-- `frontend/chat.jsx` + `frontend/selector.jsx` — `API_BASE` changed from a hardcoded string to `window.SAKKOUBOT_API_BASE || "http://localhost:8000"`.
-- `frontend/vercel.json` — minimal static-site marker (`{"version": 2}`); Vercel serves `index.html` from the root with no build step.
+- `frontend/chat.jsx` + `frontend/selector.jsx` — `API_BASE` reads from `window.SAKKOUBOT_API_BASE || "http://localhost:8000"`.
+- `frontend/vercel.json` — defines a `buildCommand` that generates `config.js` at deploy time from the `BACKEND_URL` env var: `echo "window.SAKKOUBOT_API_BASE = '${BACKEND_URL}';" > config.js`. The backend URL is set only in the Vercel dashboard — it never touches git.
 
-*Deployment order*: deploy backend first → copy its `.vercel.app` URL into `config.js` → set `CORS_ORIGINS` in backend env vars → deploy frontend.
+*Deployment order*: deploy backend → copy its URL into Vercel **frontend** project env var `BACKEND_URL` → set `CORS_ORIGINS=["https://frontend.vercel.app"]` in Vercel **backend** project env vars → deploy frontend.
 
 *Limitation*: Vercel Hobby tier has a 10-second function timeout. Chat queries are typically fine; large document indexing jobs may exceed this and require the Pro tier (300 s).
 
