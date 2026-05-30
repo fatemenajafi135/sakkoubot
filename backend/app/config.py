@@ -15,9 +15,13 @@ class Settings(BaseSettings):
     openai_chat_model: str = "gpt-4o-mini"
     openai_embedding_model: str = "text-embedding-3-small"
 
+    # Qdrant Cloud vector store
+    qdrant_url: str
+    qdrant_api_key: str
+    embedding_dimension: int = 1536  # must match openai_embedding_model output size
+
     # Storage
-    chroma_persist_dir: str = "./data/chroma"
-    db_url: str = "sqlite+aiosqlite:///./data/sakkoubot.db"
+    db_url: str  # required — set DB_URL in .env (postgresql+asyncpg://...)
 
     # RAG tuning
     chunk_size: int = 1000

@@ -1,5 +1,4 @@
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI
@@ -13,8 +12,6 @@ from app.routers import bots, chat, jobs
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    Path("./data").mkdir(exist_ok=True)
-    Path(settings.chroma_persist_dir).mkdir(parents=True, exist_ok=True)
     await init_db()
     yield
 
