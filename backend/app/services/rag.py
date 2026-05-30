@@ -5,7 +5,7 @@ import tempfile
 from pathlib import Path
 
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-from langchain_chroma import Chroma
+from langchain_qdrant import QdrantVectorStore
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_classic.chains import create_history_aware_retriever, create_retrieval_chain
 from langchain_classic.chains.combine_documents import create_stuff_documents_chain
@@ -13,9 +13,18 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import HumanMessage as LCHumanMessage, AIMessage as LCAIMessage
 from langchain_core.documents import Document
 from langchain_community.document_loaders import PyPDFLoader, TextLoader, Docx2txtLoader
-import chromadb
+from qdrant_client import QdrantClient
+from qdrant_client.models import Distance, VectorParams
 
 from app.config import settings
+
+# ── Shared clients ───────────────────────────────────────────────────────────
+
+_qdrant_client = QdrantClient(
+    url=settings.qdrant_url,
+    api_key=settings.qdrant_api_key,
+    timeout=60,
+)
 
 # ── Shared LangChain objects ──────────────────────────────────────────────────
 
@@ -251,15 +260,27 @@ _QA_PROMPT_RULES = ChatPromptTemplate.from_messages([
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
 def _collection_name(bot_id: str) -> str:
-    # ChromaDB collection names must be alphanumeric + underscores/hyphens
+    # Qdrant collection names: alphanumeric, underscore, hyphen
     return f"bot_{bot_id.replace('-', '_')}"
 
 
-def _get_vectorstore(bot_id: str) -> Chroma:
-    return Chroma(
+def _ensure_collection(bot_id: str) -> None:
+    name = _collection_name(bot_id)
+    if not _qdrant_client.collection_exists(name):
+        _qdrant_client.create_collection(
+            collection_name=name,
+            vectors_config=VectorParams(
+                size=settings.embedding_dimension,
+                distance=Distance.COSINE,
+            ),
+        )
+
+
+def _get_vectorstore(bot_id: str) -> QdrantVectorStore:
+    return QdrantVectorStore(
+        client=_qdrant_client,
         collection_name=_collection_name(bot_id),
-        embedding_function=_embeddings,
-        persist_directory=settings.chroma_persist_dir,
+        embedding=_embeddings,
     )
 
 
@@ -303,6 +324,7 @@ async def add_documents_to_bot(bot_id: str, files: list) -> int:
         return 0
 
     chunks = _make_splitter("fixed", None).split_documents(all_docs)
+    _ensure_collection(bot_id)
     vectorstore = _get_vectorstore(bot_id)
     vectorstore.add_documents(chunks)
 
@@ -383,6 +405,7 @@ def index_documents_sync(
         chunks = _make_splitter(chunking_strategy, chunk_delimiter).split_documents(all_docs)
     print(f"[chunking] strategy={chunking_strategy} {len(chunks)} chunks from {len(all_docs)} source pages")
 
+    _ensure_collection(bot_id)
     vectorstore = _get_vectorstore(bot_id)
     vectorstore.add_documents(chunks)
 
@@ -444,9 +467,8 @@ async def query_bot(
 
 
 def delete_bot_collection(bot_id: str) -> None:
-    """Remove a bot's ChromaDB collection and all its embeddings."""
+    """Remove a bot's Qdrant collection and all its embeddings."""
     try:
-        client = chromadb.PersistentClient(path=settings.chroma_persist_dir)
-        client.delete_collection(_collection_name(bot_id))
+        _qdrant_client.delete_collection(_collection_name(bot_id))
     except Exception:
         pass

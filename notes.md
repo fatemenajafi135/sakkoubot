@@ -17,7 +17,6 @@ backend/
 ├── pyproject.toml              # uv project manifest + dependencies
 ├── .env.example                # environment variable template
 ├── data/                       # runtime storage (gitignored)
-│   ├── chroma/                 # ChromaDB vector store persistence
 │   └── sakkoubot.db            # SQLite database
 └── app/
     ├── config.py               # all settings via pydantic-settings (.env)
@@ -29,7 +28,7 @@ backend/
     │   ├── chat.py             # chat endpoint
     │   └── jobs.py             # job status endpoints
     └── services/
-        └── rag.py              # LangChain + ChromaDB RAG pipeline
+        └── rag.py              # LangChain + Qdrant RAG pipeline
 ```
 
 ---
@@ -43,7 +42,7 @@ backend/
 | LLM | OpenAI (gpt-4o-mini by default) |
 | Embeddings | OpenAI (text-embedding-3-small) |
 | RAG orchestration | LangChain (langchain-classic chains) |
-| Vector store | ChromaDB (persistent, one collection per bot) |
+| Vector store | Qdrant Cloud (hosted, one collection per bot) |
 | Metadata DB | SQLite via SQLAlchemy async |
 | Document loaders | PyPDF, Docx2txt, TextLoader (langchain-community) |
 | Semantic chunking | langchain-experimental (SemanticChunker) |
@@ -81,7 +80,7 @@ The chat endpoint accepts either:
 **RAG pipeline**
 Uses LangChain's history-aware retrieval (LCEL):
 1. A contextualization prompt rewrites the user question using chat history into a standalone query.
-2. ChromaDB retrieves the top-k relevant chunks.
+2. Qdrant retrieves the top-k relevant chunks.
 3. A QA prompt feeds the context + history to the LLM to produce a grounded answer.
 4. Source documents (filename, page, excerpt) are returned alongside the answer.
 
@@ -153,10 +152,18 @@ Key properties of each prompt:
 **Chat component remount fix**
 `Chat` was keyed as `` `${activeBot}-${activeSessionId}-${sessionVersion}` ``. When the first message was sent, `onMessagesChange` created a new session and called `setActiveSessionId`, changing the key and causing React to **unmount the Chat mid-request** — killing the in-flight API call and wiping all state. Fixed by removing `activeSessionId` from the key: `` `${activeBot}-${sessionVersion}` ``. Only intentional navigation (new chat, select session, switch bot) now remounts Chat.
 
+**ChromaDB → Qdrant Cloud migration (Vercel step 1)**
+ChromaDB required a local persistent directory (`./data/chroma/`), which is incompatible with Vercel's ephemeral filesystem. Replaced with Qdrant Cloud (free tier):
+- `langchain-chroma` + `chromadb` removed; `langchain-qdrant` + `qdrant-client` added.
+- A shared `QdrantClient` singleton is created at module load from `QDRANT_URL` / `QDRANT_API_KEY` env vars with `timeout=60` (default 5 s caused write timeouts on cloud uploads).
+- `_ensure_collection(bot_id)` creates the collection (COSINE, 1536-dim) on first use; subsequent uploads and all queries connect to the existing collection.
+- Collection naming is unchanged: `bot_{bot_id}` with hyphens replaced by underscores.
+- `main.py` no longer creates the `./data/chroma/` directory on startup.
+
 **Storage**
 - Bot metadata (id, name, type, active flag, document count, status) lives in SQLite.
 - Indexing job records (id, bot_id, status, error) also in SQLite (`jobs` table).
-- Embeddings live in ChromaDB under a collection named `bot_{id}`.
+- Embeddings live in Qdrant Cloud under a collection named `bot_{id}`.
 - Deleting a bot cleans up both.
 
 ---
@@ -165,7 +172,7 @@ Key properties of each prompt:
 
 ```bash
 cd backend
-cp .env.example .env      # add your OPENAI_API_KEY
+cp .env.example .env      # add OPENAI_API_KEY, QDRANT_URL, QDRANT_API_KEY
 uv sync                   # install dependencies
 uv run uvicorn app.main:app --reload
 # Swagger UI at http://localhost:8000/docs
@@ -183,6 +190,8 @@ uv run uvicorn app.main:app --reload
 | `CHUNK_OVERLAP` | `200` | Chunk overlap |
 | `RETRIEVAL_K` | `5` | Number of chunks retrieved per query |
 | `SHOW_SOURCES` | `false` | Include retrieved source excerpts in chat responses |
-| `CHROMA_PERSIST_DIR` | `./data/chroma` | ChromaDB storage path |
+| `QDRANT_URL` | — | Required — Qdrant Cloud cluster URL |
+| `QDRANT_API_KEY` | — | Required — Qdrant Cloud API key |
+| `EMBEDDING_DIMENSION` | `1536` | Vector size; must match the embedding model (text-embedding-3-small = 1536) |
 | `DB_URL` | `sqlite+aiosqlite:///./data/sakkoubot.db` | SQLite path |
 | `CORS_ORIGINS` | localhost variants | Allowed frontend origins |
