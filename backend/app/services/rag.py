@@ -94,6 +94,23 @@ def _chapter_at(offset: int, chapter_map: list[tuple[int, str]]) -> str | None:
     return label
 
 
+def _chunk_per_file(docs: list) -> list:
+    """Merge all pages of the same source file into a single Document."""
+    groups: dict[str, list] = {}
+    for doc in docs:
+        key = doc.metadata.get("source_filename", "__unknown__")
+        groups.setdefault(key, []).append(doc)
+
+    result: list[Document] = []
+    for filename, pages in groups.items():
+        full_text = "\n".join(p.page_content for p in pages)
+        base_meta = {k: v for k, v in pages[0].metadata.items() if k != "page"}
+        result.append(Document(page_content=full_text, metadata={**base_meta, "chunk_type": "per_file"}))
+
+    print(f"[per_file] {len(groups)} file(s) → {len(result)} chunk(s)")
+    return result
+
+
 def _chunk_legal_aware(docs: list) -> list:
     """
     Per-document detection and splitting:
@@ -418,7 +435,9 @@ def index_documents_sync(
     if not all_docs:
         return 0
 
-    if chunking_strategy == "whole_document":
+    if chunking_strategy == "per_file":
+        chunks = _chunk_per_file(all_docs)
+    elif chunking_strategy == "whole_document":
         chunks = all_docs
     elif chunking_strategy == "legal_aware":
         chunks = _chunk_legal_aware(all_docs)
