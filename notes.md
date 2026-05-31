@@ -109,7 +109,7 @@ FastAPI + Pydantic v2 emits `contentMediaType: application/octet-stream` for `Up
 - `fixed` — `RecursiveCharacterTextSplitter` using `CHUNK_SIZE` / `CHUNK_OVERLAP` from config (original behaviour)
 - `semantic` — `SemanticChunker` from `langchain-experimental`; splits at natural semantic boundaries by calling the embedding model during ingestion
 - `whole_document` — no splitting; each page/doc object from the loader becomes one chunk (multi-page PDFs produce multiple chunks)
-- `per_file` — merges all pages of the same source file into a single `Document`; ideal for resumes where one file = one person and should be retrieved as a whole
+- `per_file` — merges all pages of the same source file into a single `Document`; ideal for resumes where one file = one person and should be retrieved as a whole. Added to `ChunkingStrategy` Literal in `models.py` and documented in the `POST /bots` endpoint docstring so it appears in Swagger UI
 - `delimiter` — `CharacterTextSplitter` splits on an arbitrary string (`chunk_delimiter`); requires `chunk_delimiter` to be provided (422 otherwise)
 - `legal_aware` — smart per-document strategy designed for Persian regulatory documents mixed with general docs in the same bot:
   - Detects each file independently: if the document contains ≥2 `ماده` markers (supports both Persian ۱-۹ and ASCII 1-9 digits), it's treated as a structured legal doc; otherwise it falls back to `RecursiveCharacterTextSplitter`.
