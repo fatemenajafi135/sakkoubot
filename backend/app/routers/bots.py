@@ -98,8 +98,10 @@ async def create_bot(
     Chunking strategies:
     - **fixed** (default): split by character count (chunk_size / chunk_overlap from config)
     - **semantic**: split at natural semantic boundaries using embeddings
-    - **whole_document**: each uploaded file becomes a single chunk
+    - **whole_document**: no splitting; each page/doc from the loader is one chunk
+    - **per_file**: merge all pages of the same file into one chunk (one chunk per resume)
     - **delimiter**: split on a custom delimiter string (requires chunk_delimiter)
+    - **legal_aware**: smart strategy for Persian legal docs mixed with general files
     """
     if chunking_strategy == "delimiter" and not chunk_delimiter:
         raise HTTPException(

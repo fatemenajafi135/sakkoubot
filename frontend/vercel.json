@@ -1,0 +1,5 @@
+{
+  "version": 2,
+  "buildCommand": "echo \"window.SAKKOUBOT_API_BASE = '${BACKEND_URL}';\" > config.js",
+  "outputDirectory": "."
+}

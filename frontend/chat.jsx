@@ -642,7 +642,7 @@ const CHAT_CSS = `
 `;
 
 // ── Backend API ──────────────────────────────────────────────────────────
-const API_BASE = "http://localhost:8000";
+const API_BASE = window.SAKKOUBOT_API_BASE || "http://localhost:8000";
 
 
 // ── Markdown renderer ──────────────────────────────────────────────────

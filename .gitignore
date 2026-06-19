@@ -219,3 +219,6 @@ __marimo__/
 
 
 backend/data/
+
+# Frontend API config — contains backend URL, keep local only (like .env)
+frontend/config.js

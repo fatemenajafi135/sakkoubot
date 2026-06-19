@@ -3,7 +3,7 @@ from typing import Literal, Optional
 from datetime import datetime
 
 BotType = Literal["resume", "rules"]
-ChunkingStrategy = Literal["fixed", "semantic", "whole_document", "delimiter", "legal_aware"]
+ChunkingStrategy = Literal["fixed", "semantic", "whole_document", "per_file", "delimiter", "legal_aware"]
 
 
 class BotResponse(BaseModel):

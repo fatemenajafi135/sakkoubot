@@ -219,7 +219,7 @@ const SELECTOR_CSS = `
 }
 `;
 
-const API_BASE = "http://localhost:8000";
+const API_BASE = window.SAKKOUBOT_API_BASE || "http://localhost:8000";
 
 function toPersianDigits(n) {
   return String(n).replace(/\d/g, (d) => "۰۱۲۳۴۵۶۷۸۹"[d]);
