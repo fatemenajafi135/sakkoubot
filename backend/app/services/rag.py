@@ -24,6 +24,9 @@ if settings.langsmith_api_key:
     os.environ["LANGCHAIN_TRACING_V2"] = "true"
     os.environ["LANGCHAIN_API_KEY"] = settings.langsmith_api_key
     os.environ["LANGCHAIN_PROJECT"] = settings.langsmith_project
+    # On serverless (Vercel) the function freezes after returning the response,
+    # killing the background thread that uploads traces. Flush synchronously.
+    os.environ["LANGCHAIN_CALLBACKS_BACKGROUND"] = "false"
 
 # ── Shared clients ───────────────────────────────────────────────────────────
 
