@@ -36,6 +36,10 @@ class Settings(BaseSettings):
         "http://127.0.0.1:5500",
     ]
 
+    # LangSmith tracing (optional — tracing is disabled when not set)
+    langsmith_api_key: str | None = None
+    langsmith_project: str = "sakkoubot"
+
     # App metadata
     app_title: str = "SakkouBot API"
     app_version: str = "0.1.0"

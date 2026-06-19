@@ -18,6 +18,13 @@ from qdrant_client.models import Distance, VectorParams
 
 from app.config import settings
 
+# ── LangSmith tracing (opt-in via LANGSMITH_API_KEY env var) ─────────────────
+
+if settings.langsmith_api_key:
+    os.environ["LANGCHAIN_TRACING_V2"] = "true"
+    os.environ["LANGCHAIN_API_KEY"] = settings.langsmith_api_key
+    os.environ["LANGCHAIN_PROJECT"] = settings.langsmith_project
+
 # ── Shared clients ───────────────────────────────────────────────────────────
 
 _qdrant_client = QdrantClient(
